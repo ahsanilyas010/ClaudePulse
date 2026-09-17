@@ -699,9 +699,12 @@ const server = http.createServer((req, res) => {
     return fs.createReadStream(path.join(__dirname, 'index.html')).pipe(res);
   }
   if (req.method === 'GET' && (url.pathname === '/pulse.css' || url.pathname === '/cloud.html')) {
+    // served from public-site/ — that folder is also what's deployed to Vercel as its own
+    // standalone project (see public-site/README.md), so this is the single source of truth.
     const type = url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8';
+    const file = url.pathname === '/cloud.html' ? 'index.html' : 'pulse.css';
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
-    return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
+    return fs.createReadStream(path.join(__dirname, 'public-site', file)).pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
