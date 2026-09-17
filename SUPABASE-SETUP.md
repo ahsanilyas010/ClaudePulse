@@ -24,11 +24,19 @@ npx supabase functions deploy pulse-api --no-verify-jwt
 
 ## Setting up a second device
 
-1. On that device, open `cloud.html` from wherever you've hosted this repo's static files
-   (e.g. a Vercel static deploy, or just `file://` the folder for a quick check).
+1. Open **https://claude-pulse-web.vercel.app** (deployed from `public-site/`, auto-deploys on
+   every push to `main` — see that folder's own README).
 2. Paste the Supabase project URL (`https://udiloonuymsihqrjuwjj.supabase.co`) and the
    `pulseToken` value from this machine's `pulse-cloud.json`.
 3. It polls the Edge Function directly — no local server needed on that device.
+
+Vercel project: `claude-pulse-web` (team `Ahsan's projects`), Vercel Authentication turned off
+so it loads without a Vercel login prompt (the Supabase token is what actually gates the data).
+
+There's also an older, broken `claude-pulse` Vercel project (rooted at the repo root) from the
+first attempt — it got stuck with its Framework setting locked to "Node" after auto-detecting
+`server.js`, which can't be changed after the fact via the API. It's unused and safe to delete
+from the Vercel dashboard.
 
 Treat the token like a password: anyone who has it can read your session activity (titles,
 prompts, replies, file names). Rotate it by generating a new one and re-running
