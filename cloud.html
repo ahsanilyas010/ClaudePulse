@@ -6,8 +6,35 @@
 <title>Claude Pulse</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23d97757'/><path d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <link rel="stylesheet" href="pulse.css">
+<style>
+  /* cloud-only additions */
+  .setup { max-width: 440px; margin: 14vh auto 0; padding: 26px 26px 22px; }
+  .setup h2 { margin: 0 0 4px; font-size: 18px; }
+  .setup p { color: var(--muted); font-size: 13.5px; margin: 0 0 18px; }
+  .setup label { display: block; font-size: 12.5px; font-weight: 650; color: var(--muted); margin: 14px 0 5px; }
+  .setup input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; }
+  .setup input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .setup .err { color: var(--error); font-size: 13px; margin-top: 12px; display: none; }
+  .setup .hint2 { font-size: 12px; color: var(--faint); margin-top: 6px; }
+  .setup .btn { margin-top: 18px; width: 100%; justify-content: center; }
+  .gear { color: var(--faint); }
+  .offline-note { padding: 10px 14px; font-size: 12.5px; color: var(--muted); margin-top: 14px; }
+</style>
 </head>
 <body>
+<div id="setup" class="panel setup hidden">
+  <h2>Connect Claude Pulse</h2>
+  <p>Paste the Supabase project URL and the Pulse token from your main PC's <code>pulse-cloud.json</code>.</p>
+  <label for="inUrl">Supabase project URL</label>
+  <input id="inUrl" placeholder="https://xxxx.supabase.co" autocomplete="off">
+  <label for="inToken">Pulse token</label>
+  <input id="inToken" placeholder="paste the shared token" autocomplete="off">
+  <div class="hint2">Stored only in this browser. Anyone with this token can read your session activity — treat it like a password.</div>
+  <button class="btn primary" id="connectBtn">Connect</button>
+  <div class="err" id="setupErr"></div>
+</div>
+
+<div id="app" class="hidden">
 <header>
   <div class="wrap">
     <div class="bar">
@@ -17,12 +44,11 @@
         <span class="conn" id="conn" title="Disconnected"></span>
       </div>
       <div class="spacer"></div>
-      <button class="btn icon-btn" id="bell" title="Windows notifications">
+      <button class="btn icon-btn" id="bell" title="Browser notifications">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
       </button>
-      <button class="btn primary" id="briefBtn" title="Ask Claude for a status update across all projects">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/></svg>
-        Brief me
+      <button class="btn icon-btn gear" id="settingsBtn" title="Change connection">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
     </div>
     <div class="stats" id="stats"></div>
@@ -36,16 +62,10 @@
 
 <main class="wrap">
   <section id="tab-code">
-    <div class="panel" id="brief">
-      <h3><span id="briefIcon"></span> Status brief <button class="close" id="briefClose" aria-label="Close">×</button></h3>
-      <div class="body" id="briefBody"></div>
-    </div>
-
     <div id="feedWrap" class="hidden">
       <div class="section-title">Live updates <span class="line"></span></div>
       <div id="feed"></div>
     </div>
-
     <div class="section-title">Projects <span class="line"></span></div>
     <div id="projects"></div>
     <details class="older" id="olderWrap">
@@ -62,18 +82,9 @@
         <button data-period="week">Last 7 days</button>
         <button data-period="month">Last 30 days</button>
       </div>
-      <button class="btn primary" id="reviewBtn" title="Ask Claude what got done and what to finish or drop">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>
-        Review with Claude
-      </button>
     </div>
     <div class="h-range" id="hRange"></div>
-
-    <div class="panel" id="review">
-      <h3><span id="reviewIcon"></span> <span id="reviewTitle">Review</span> <button class="close" id="reviewClose" aria-label="Close">×</button></h3>
-      <div class="body" id="reviewBody"></div>
-    </div>
-
+    <div class="panel offline-note">Review with Claude runs on your main PC — open Pulse there for an AI summary. This view shows the same data live.</div>
     <div class="tiles" id="tiles"></div>
     <div class="panel chart hidden" id="chart"></div>
     <div id="hSections"></div>
@@ -81,41 +92,32 @@
 
   <section id="tab-cloud" class="hidden">
     <div class="panel note">
-      <b>Why these aren't live.</b> Claude Code keeps its sessions on your computer, so Pulse can follow them second by second.
-      claude.ai chats and Claude Design projects are stored in your Claude account in the cloud, and there's no public API
-      that lets a local app read them. Use the shortcuts below to jump straight in. Anything you run in Claude Code
-      (desktop Code tab or the terminal) shows up on the first tab automatically.
+      <b>Why these aren't live.</b> claude.ai chats and Claude Design projects are stored in your Claude account in the
+      cloud with no public API a dashboard can read. Use the shortcuts below to jump straight in.
     </div>
     <div class="cloud">
-      <div class="panel">
-        <h3>Recent chats</h3>
-        <p>Your latest conversations on claude.ai.</p>
-        <a class="btn" href="https://claude.ai/recents" target="_blank" rel="noopener">Open chats ↗</a>
-      </div>
-      <div class="panel">
-        <h3>Projects</h3>
-        <p>claude.ai Projects, with their knowledge and chats.</p>
-        <a class="btn" href="https://claude.ai/projects" target="_blank" rel="noopener">Open projects ↗</a>
-      </div>
-      <div class="panel">
-        <h3>Claude Design</h3>
-        <p>Your design canvases and prototypes.</p>
-        <a class="btn" href="https://claude.ai/design" target="_blank" rel="noopener">Open Claude Design ↗</a>
-      </div>
+      <div class="panel"><h3>Recent chats</h3><p>Your latest conversations on claude.ai.</p><a class="btn" href="https://claude.ai/recents" target="_blank" rel="noopener">Open chats ↗</a></div>
+      <div class="panel"><h3>Projects</h3><p>claude.ai Projects, with their knowledge and chats.</p><a class="btn" href="https://claude.ai/projects" target="_blank" rel="noopener">Open projects ↗</a></div>
+      <div class="panel"><h3>Claude Design</h3><p>Your design canvases and prototypes.</p><a class="btn" href="https://claude.ai/design" target="_blank" rel="noopener">Open Claude Design ↗</a></div>
     </div>
   </section>
 </main>
+</div>
 
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const LS_URL = 'pulse.supabaseUrl', LS_TOKEN = 'pulse.token', LS_NOTIFY = 'pulse.notify';
 
-  let state = { sessions: [], toasts: true };
+  let conn = null; // { supabaseUrl, token }
+  let state = { sessions: [] };
   let filter = '';
   const openIds = new Set();
   const feed = [];
   const OLD_MS = 7 * 86400_000;
+  let notifyOn = false;
+  try { notifyOn = localStorage.getItem(LS_NOTIFY) === '1'; } catch {}
 
   const ago = (ts) => {
     if (!ts) return '';
@@ -128,6 +130,59 @@
   };
   const fmtTokens = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
   const shortModel = (m) => (m || '').replace(/^claude-/, '').replace(/-\d{8}$/, '');
+
+  // --- connection setup (paste-once, stored in this browser only)
+  function loadConn() {
+    try {
+      const supabaseUrl = localStorage.getItem(LS_URL);
+      const token = localStorage.getItem(LS_TOKEN);
+      if (supabaseUrl && token) return { supabaseUrl, token };
+    } catch {}
+    return null;
+  }
+  function showSetup(err) {
+    $('app').classList.add('hidden');
+    $('setup').classList.remove('hidden');
+    if (err) { $('setupErr').textContent = err; $('setupErr').style.display = 'block'; }
+    if (conn) { $('inUrl').value = conn.supabaseUrl; $('inToken').value = conn.token; }
+  }
+  $('connectBtn').addEventListener('click', async () => {
+    const supabaseUrl = $('inUrl').value.trim().replace(/\/+$/, '');
+    const token = $('inToken').value.trim();
+    $('setupErr').style.display = 'none';
+    if (!/^https:\/\/.+\.supabase\.co$/.test(supabaseUrl) || !token) {
+      $('setupErr').textContent = 'Enter the full project URL (https://xxxx.supabase.co) and the token.';
+      $('setupErr').style.display = 'block';
+      return;
+    }
+    $('connectBtn').disabled = true;
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/pulse-api/state`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(res.status === 401 ? 'That token was rejected.' : `Server returned ${res.status}.`);
+      localStorage.setItem(LS_URL, supabaseUrl);
+      localStorage.setItem(LS_TOKEN, token);
+      conn = { supabaseUrl, token };
+      $('setup').classList.add('hidden');
+      $('app').classList.remove('hidden');
+      start();
+    } catch (e) {
+      $('setupErr').textContent = `Couldn't connect: ${e.message}`;
+      $('setupErr').style.display = 'block';
+    } finally {
+      $('connectBtn').disabled = false;
+    }
+  });
+  $('settingsBtn').addEventListener('click', () => showSetup());
+
+  async function api(path) {
+    const res = await fetch(`${conn.supabaseUrl}/functions/v1/pulse-api/${path}`, {
+      method: path.startsWith('decision') ? 'POST' : 'GET',
+      headers: { Authorization: `Bearer ${conn.token}` },
+    });
+    if (res.status === 401) { conn = null; try { localStorage.removeItem(LS_TOKEN); } catch {} showSetup('Your token stopped working — reconnect.'); throw new Error('unauthorized'); }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
 
   const STAT_DEFS = [
     ['working', 'Working', (s) => s.status === 'working', 'var(--working)'],
@@ -155,7 +210,7 @@
     else if (s.notice) lines.push(`<div class="s-line err"><span class="k">Note</span><span class="v">${esc(s.notice)}</span></div>`);
     else if (s.lastReply) lines.push(`<div class="s-line"><span class="k">Claude</span><span class="v">${esc(s.lastReply)}</span></div>`);
 
-    const tl = s.timeline.slice().reverse().map((e) => {
+    const tl = (s.timeline || []).slice().reverse().map((e) => {
       const who = { you: 'You', claude: 'Claude', tool: 'Tool', error: 'Issue' }[e.kind] || e.kind;
       const txt = e.kind === 'tool' ? `<span class="tn">${esc(e.name)}</span> ${esc(e.text)}` : esc(e.text);
       return `<div class="ev ${e.kind}"><span class="who">${who}</span><span class="txt">${txt}</span></div>`;
@@ -163,11 +218,11 @@
 
     const foot = [
       s.model && `<span>${esc(shortModel(s.model))}</span>`,
+      s.host && `<span>💻 ${esc(s.host)}</span>`,
       `<span>${s.prompts} prompt${s.prompts === 1 ? '' : 's'}</span>`,
       `<span>${s.tools} tool calls</span>`,
       s.outTokens ? `<span>${fmtTokens(s.outTokens)} tokens out</span>` : '',
       s.branch && `<span>⎇ ${esc(s.branch)}</span>`,
-      s.localId ? `<a href="claude://claude.ai/epitaxy/${encodeURIComponent(s.localId)}" onclick="event.stopPropagation()">Open in Claude ↗</a>` : '',
     ].filter(Boolean).join('');
 
     return `<div class="session ${openIds.has(s.id) ? 'open' : ''}" data-id="${esc(s.id)}">
@@ -213,17 +268,14 @@
     if (def) list = list.filter(def[2]);
     const recent = def ? list : list.filter((s) => s.status === 'working' || s.status === 'attention' || s.status === 'error' || Date.now() - s.lastTs < OLD_MS);
     const older = def ? [] : list.filter((s) => !recent.includes(s));
-    const archived = state.sessions.filter((s) => s.archived);
 
     $('projects').innerHTML = recent.length ? projectsHtml(recent)
-      : `<div class="panel empty"><b>${def ? 'Nothing here right now' : 'No recent Claude Code activity'}</b>${def ? 'Clear the filter to see everything.' : 'Start a session in Claude Code and it will appear here live.'}</div>`;
-    const rest = older.concat(filter ? [] : archived);
-    $('olderWrap').classList.toggle('hidden', !rest.length);
-    $('olderSummary').textContent = `Older & archived sessions (${rest.length})`;
-    $('older').innerHTML = rest.length ? projectsHtml(rest) : '';
+      : `<div class="panel empty"><b>${def ? 'Nothing here right now' : 'No recent Claude Code activity'}</b>${def ? 'Clear the filter to see everything.' : 'Nothing has synced from your main PC yet.'}</div>`;
+    $('olderWrap').classList.toggle('hidden', !older.length);
+    $('olderSummary').textContent = `Older sessions (${older.length})`;
+    $('older').innerHTML = older.length ? projectsHtml(older) : '';
 
-    $('bell').style.color = state.toasts ? 'var(--accent)' : 'var(--faint)';
-    $('bell').title = state.toasts ? 'Windows notifications on (click to mute)' : 'Windows notifications muted (click to enable)';
+    $('bell').style.color = notifyOn ? 'var(--accent)' : 'var(--faint)';
   }
 
   function renderFeed() {
@@ -237,20 +289,52 @@
       </div>`).join('');
   }
 
-  // --- live connection
-  function connect() {
-    const es = new EventSource('/events');
-    es.addEventListener('open', () => { $('conn').classList.add('on'); $('conn').title = 'Live'; });
-    es.addEventListener('error', () => { $('conn').classList.remove('on'); $('conn').title = 'Reconnecting…'; });
-    es.addEventListener('state', (e) => { state = JSON.parse(e.data); render(); scheduleHistoryRefresh(); });
-    es.addEventListener('decision', () => { if (currentTab === 'history') loadHistory(); });
-    es.addEventListener('notify', (e) => {
-      const ev = JSON.parse(e.data);
-      feed.unshift(ev);
-      feed.length = Math.min(feed.length, 20);
-      renderFeed();
-    });
+  // --- polling (Edge Functions have no push channel here, so we poll)
+  const prevStatus = new Map();
+  function checkTransitions(sessions) {
+    for (const s of sessions) {
+      const prev = prevStatus.get(s.id);
+      prevStatus.set(s.id, s.status);
+      if (prev === undefined || prev === s.status) continue;
+      let ev = null;
+      if (s.status === 'error') ev = { kind: 'error', title: `Error — ${s.title}`, body: s.error || 'Session hit an error' };
+      else if (s.status === 'attention') ev = { kind: 'attention', title: `Needs your input — ${s.title}`, body: s.statusLabel };
+      else if (prev === 'working' && (s.status === 'your-turn' || s.status === 'finished')) ev = { kind: 'done', title: `Claude finished — ${s.title}`, body: (s.lastReply || '').slice(0, 180) };
+      if (ev) {
+        ev.ts = Date.now();
+        feed.unshift(ev);
+        feed.length = Math.min(feed.length, 20);
+        renderFeed();
+        if (notifyOn && document.hidden && Notification.permission === 'granted') new Notification(ev.title, { body: ev.body });
+      }
+    }
   }
+
+  let pollTimer = 0;
+  async function poll() {
+    try {
+      state = await api('state');
+      $('conn').classList.add('on'); $('conn').title = 'Live';
+      checkTransitions(state.sessions);
+      render();
+      if (currentTab === 'history') loadHistory();
+    } catch (e) {
+      if (e.message !== 'unauthorized') { $('conn').classList.remove('on'); $('conn').title = 'Reconnecting…'; }
+    } finally {
+      pollTimer = setTimeout(poll, document.hidden ? 20_000 : 6_000);
+    }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(pollTimer); poll(); } });
+
+  $('bell').addEventListener('click', async () => {
+    if (!notifyOn && Notification.permission !== 'granted') {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') return;
+    }
+    notifyOn = !notifyOn;
+    try { localStorage.setItem(LS_NOTIFY, notifyOn ? '1' : '0'); } catch {}
+    render();
+  });
 
   // --- interactions
   document.addEventListener('click', (e) => {
@@ -269,15 +353,14 @@
     if (periodBtn) {
       period = periodBtn.dataset.period;
       document.querySelectorAll('[data-period]').forEach((b) => b.classList.toggle('on', b === periodBtn));
-      $('review').classList.remove('show');
       loadHistory();
       return;
     }
     const decide = e.target.closest('[data-decide]');
     if (decide) {
       const { id, decide: want, current } = decide.dataset;
-      const state = current === want ? 'clear' : want;
-      fetch(`/api/decision?id=${encodeURIComponent(id)}&state=${state}`, { method: 'POST', headers: { 'X-Pulse': '1' } }).then(loadHistory);
+      const st = current === want ? 'clear' : want;
+      api(`decision?id=${encodeURIComponent(id)}&state=${st}`).then(loadHistory).catch(() => {});
       return;
     }
     const more = e.target.closest('[data-more]');
@@ -289,59 +372,6 @@
       sess.classList.toggle('open');
     }
   });
-
-  $('bell').addEventListener('click', async () => {
-    const on = !state.toasts;
-    await fetch(`/api/toasts?on=${on ? 1 : 0}`, { method: 'POST', headers: { 'X-Pulse': '1' } });
-    if (on) fetch('/api/test-toast', { method: 'POST', headers: { 'X-Pulse': '1' } });
-  });
-
-  function md(text) {
-    const lines = esc(text).split(/\r?\n/);
-    let html = '', inList = false;
-    const inline = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
-    for (const raw of lines) {
-      const l = raw.trimEnd();
-      const li = l.match(/^\s*[-*•]\s+(.*)/);
-      if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
-      if (inList) { html += '</ul>'; inList = false; }
-      const h = l.match(/^#{1,6}\s+(.*)/);
-      if (h) html += `<h4>${inline(h[1])}</h4>`;
-      else if (l.trim()) html += `<p>${inline(l)}</p>`;
-    }
-    return html + (inList ? '</ul>' : '');
-  }
-
-  // streams a Claude answer from the server into a panel
-  async function streamInto(url, { panel, body, icon, btn, waiting }) {
-    btn.disabled = true;
-    panel.classList.add('show');
-    icon.innerHTML = '<span class="spin"></span>';
-    body.innerHTML = `<p style="color:var(--muted)">${esc(waiting)}</p>`;
-    let text = '';
-    try {
-      const res = await fetch(url, { method: 'POST', headers: { 'X-Pulse': '1' } });
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        text += dec.decode(value, { stream: true });
-        body.innerHTML = md(text);
-      }
-      if (!text.trim()) body.innerHTML = '<p>No response from Claude.</p>';
-    } catch (err) {
-      body.innerHTML = `<p>Couldn't reach the Pulse server: ${esc(err.message)}</p>`;
-    } finally {
-      icon.textContent = '';
-      btn.disabled = false;
-    }
-  }
-
-  $('briefClose').addEventListener('click', () => $('brief').classList.remove('show'));
-  $('briefBtn').addEventListener('click', () => streamInto('/api/brief', {
-    panel: $('brief'), body: $('briefBody'), icon: $('briefIcon'), btn: $('briefBtn'), waiting: 'Asking Claude to review your sessions…',
-  }));
 
   // --- history
   let currentTab = 'code';
@@ -359,19 +389,9 @@
     return { from: shift(start, -29), to: shift(start, 1) };
   }
 
-  let historyTimer = 0;
   async function loadHistory() {
     const { from, to } = rangeFor(period);
-    try {
-      const res = await fetch(`/api/history?from=${from}&to=${to}`);
-      history = await res.json();
-      renderHistory();
-    } catch { /* server restarting; next state event retries */ }
-  }
-  // keep History fresh while it's on screen, without refetching on every live tick
-  function scheduleHistoryRefresh() {
-    if (currentTab !== 'history' || historyTimer) return;
-    historyTimer = setTimeout(() => { historyTimer = 0; loadHistory(); }, 10_000);
+    try { history = await api(`history?from=${from}&to=${to}`); renderHistory(); } catch {}
   }
 
   const dateFmt = (ts, opts) => new Date(ts).toLocaleString(undefined, opts);
@@ -392,18 +412,13 @@
         <span class="item-when">${whenLabel(it.firstTs)}${it.lastTs - it.firstTs > 60_000 ? ' – ' + (dateFmt(it.firstTs, { dateStyle: 'short' }) === dateFmt(it.lastTs, { dateStyle: 'short' }) ? timeOnly(it.lastTs) : whenLabel(it.lastTs)) : ''}</span>
       </div>
       <div class="hint ${warn ? 'warn' : ''}">${esc(it.hint)}${it.changedSinceDecision ? ' · new activity since you marked it' : ''}</div>
-      ${it.askCount ? `<div class="kv"><div class="k">You asked (${it.askCount})</div><ul class="asks">
-        ${asks.map((a) => `<li><time>${whenLabel(a.ts)}</time>${esc(a.text)}</li>`).join('')}
-      </ul></div>` : ''}
+      ${it.askCount ? `<div class="kv"><div class="k">Requests (${it.askCount})</div>${asks.length ? `<ul class="asks">${asks.map((a) => `<li><time>${whenLabel(a.ts)}</time>${esc(a.text)}</li>`).join('')}</ul>` : '<div class="hint">Request text isn\'t synced yet — open Pulse on your main PC to see it.</div>'}</div>` : ''}
       ${it.fileCount ? `<div class="kv"><div class="k">Files changed (${it.fileCount})</div><div class="files">
         ${files.map((f) => `<span class="file" title="${esc(f.path)}">${esc(f.name)}</span>`).join('')}
       </div></div>` : ''}
       ${it.lastReply ? `<div class="kv"><div class="k">Where it ended</div><div class="ended" ${open ? 'style="-webkit-line-clamp:12"' : ''}>${esc(it.lastReply)}</div></div>` : ''}
       ${!open && (it.asks.length > 3 || it.files.length > 8 || (it.lastReply || '').length > 220) ? `<button class="more" data-more="${esc(it.id)}">Show more</button>` : ''}
-      <div class="actions">
-        ${btn('done', '✓ Done')}${btn('keep', '↺ Keep open')}${btn('drop', '✕ Drop')}
-        ${it.localId ? `<a href="claude://claude.ai/epitaxy/${encodeURIComponent(it.localId)}">Open in Claude ↗</a>` : ''}
-      </div>
+      <div class="actions">${btn('done', '✓ Done')}${btn('keep', '↺ Keep open')}${btn('drop', '✕ Drop')}</div>
     </div>`;
   }
 
@@ -446,18 +461,12 @@
       ${list.map(itemHtml).join('')}`).join('');
   }
 
-  $('reviewClose').addEventListener('click', () => $('review').classList.remove('show'));
-  $('reviewBtn').addEventListener('click', () => {
-    const { from, to } = rangeFor(period);
-    $('reviewTitle').textContent = `Review of ${PERIOD_LABEL[period].replace(/^in the /, 'the ')}`;
-    streamInto(`/api/brief?from=${from}&to=${to}&label=${encodeURIComponent(PERIOD_LABEL[period])}`, {
-      panel: $('review'), body: $('reviewBody'), icon: $('reviewIcon'), btn: $('reviewBtn'), waiting: 'Asking Claude what got done and what’s left…',
-    });
-  });
-
   setInterval(() => document.querySelectorAll('[data-ts]').forEach((el) => { el.textContent = ago(+el.dataset.ts); }), 15_000);
 
-  connect();
+  function start() { poll(); }
+
+  conn = loadConn();
+  if (conn) { $('app').classList.remove('hidden'); start(); } else { showSetup(); }
 })();
 </script>
 </body>

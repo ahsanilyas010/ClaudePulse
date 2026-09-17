@@ -18,6 +18,9 @@ const DESKTOP_DIR = path.join(APPDATA, 'Claude', 'claude-code-sessions');
 const CLI_DIR = path.join(APPDATA, 'Claude', 'claude-code');
 const BRIEF_CWD = path.join(os.tmpdir(), 'claude-pulse-brief');
 const DATA_FILE = path.join(__dirname, 'pulse-data.json'); // your Done / Drop / Keep decisions
+const CLOUD_CONFIG_FILE = path.join(__dirname, 'pulse-cloud.json'); // optional: { supabaseUrl, pulseToken }
+const CLOUD_SYNC_MS = 15_000;
+const HOST_NAME = os.hostname();
 
 const SCAN_MS = 1500;
 const ACTIVE_WINDOW_MS = 90_000;   // transcript written this recently => still working (when no live process file)
@@ -633,6 +636,54 @@ function tick() {
   }
 }
 
+// ---------------------------------------------------------------- optional cloud sync (Supabase)
+
+let cloudConfig = null;
+function loadCloudConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(CLOUD_CONFIG_FILE, 'utf8'));
+    if (c && c.supabaseUrl && c.pulseToken) return { supabaseUrl: c.supabaseUrl.replace(/\/+$/, ''), pulseToken: c.pulseToken };
+  } catch { /* cloud sync is optional; absence is normal */ }
+  return null;
+}
+
+async function cloudFetch(path, init = {}) {
+  const c = cloudConfig;
+  if (!c) return null;
+  const res = await fetch(`${c.supabaseUrl}/functions/v1/pulse-api/${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.pulseToken}`, ...(init.headers || {}) },
+  });
+  if (!res.ok) throw new Error(`cloud ${path} -> HTTP ${res.status}: ${clip(await res.text().catch(() => ''), 200)}`);
+  return res;
+}
+
+function flattenDays() {
+  const out = [];
+  for (const s of sessions.values()) {
+    for (const [day, b] of s.days) {
+      if (!b.prompts && !b.tools) continue;
+      out.push({ sessionId: s.id, day, prompts: b.prompts, tools: b.tools, tokens: b.tokens, files: [...b.files], firstTs: b.firstTs, lastTs: b.lastTs });
+    }
+  }
+  return out;
+}
+
+let cloudSyncing = false;
+async function cloudSync() {
+  if (!cloudConfig || cloudSyncing) return;
+  cloudSyncing = true;
+  try {
+    const view = buildView();
+    if (view.length) await cloudFetch('ingest', { method: 'POST', body: JSON.stringify({ host: HOST_NAME, sessions: view, days: flattenDays() }) });
+  } catch (e) {
+    console.error('[pulse] cloud sync failed:', e.message);
+  } finally {
+    cloudSyncing = false;
+    setTimeout(cloudSync, CLOUD_SYNC_MS);
+  }
+}
+
 const allowedHosts = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 
 const server = http.createServer((req, res) => {
@@ -643,9 +694,14 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     return fs.createReadStream(path.join(__dirname, 'index.html')).pipe(res);
   }
+  if (req.method === 'GET' && (url.pathname === '/pulse.css' || url.pathname === '/cloud.html')) {
+    const type = url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8';
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+    return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
+  }
   if (req.method === 'GET' && url.pathname === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(snapshot()));
+    return res.end(JSON.stringify({ ...snapshot(), cloud: !!cloudConfig }));
   }
   if (req.method === 'GET' && url.pathname === '/api/history') {
     const to = Number(url.searchParams.get('to')) || Date.now();
@@ -672,6 +728,7 @@ const server = http.createServer((req, res) => {
       else decisions[id] = { state, at: Date.now() };
       saveDecisions();
       broadcast('decision', { id, decision: decisions[id] || null });
+      if (cloudConfig) cloudFetch(`decision?id=${encodeURIComponent(id)}&state=${state}`, { method: 'POST' }).catch((e) => console.error('[pulse] cloud decision failed:', e.message));
       res.writeHead(204);
       return res.end();
     }
@@ -700,5 +757,8 @@ server.on('error', (e) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[pulse] Claude Pulse running at http://localhost:${PORT}`);
+  cloudConfig = loadCloudConfig();
+  console.log(cloudConfig ? `[pulse] cloud sync enabled -> ${cloudConfig.supabaseUrl}` : '[pulse] cloud sync not configured (pulse-cloud.json not found)');
   tick();
+  if (cloudConfig) cloudSync();
 });

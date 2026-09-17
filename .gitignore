@@ -1,4 +1,5 @@
-# personal runtime data — not shared, will move to Supabase
+# personal runtime data and secrets — never committed
 pulse-data.json
+pulse-cloud.json
 node_modules/
 *.log
