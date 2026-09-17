@@ -658,9 +658,13 @@ async function cloudFetch(path, init = {}) {
   return res;
 }
 
-function flattenDays() {
+// Only for session ids actually being upserted this cycle (`ids`) — day_stats.session_id has
+// a foreign key to sessions.id, so a day-row for a session buildView() filtered out (deleted,
+// sidechain, etc.) would violate it and fail the whole cloud upsert.
+function flattenDays(ids) {
   const out = [];
   for (const s of sessions.values()) {
+    if (!ids.has(s.id)) continue;
     for (const [day, b] of s.days) {
       if (!b.prompts && !b.tools) continue;
       out.push({ sessionId: s.id, day, prompts: b.prompts, tools: b.tools, tokens: b.tokens, files: [...b.files], firstTs: b.firstTs, lastTs: b.lastTs });
@@ -675,7 +679,7 @@ async function cloudSync() {
   cloudSyncing = true;
   try {
     const view = buildView();
-    if (view.length) await cloudFetch('ingest', { method: 'POST', body: JSON.stringify({ host: HOST_NAME, sessions: view, days: flattenDays() }) });
+    if (view.length) await cloudFetch('ingest', { method: 'POST', body: JSON.stringify({ host: HOST_NAME, sessions: view, days: flattenDays(new Set(view.map((v) => v.id))) }) });
   } catch (e) {
     console.error('[pulse] cloud sync failed:', e.message);
   } finally {
@@ -704,8 +708,10 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ...snapshot(), cloud: !!cloudConfig }));
   }
   if (req.method === 'GET' && url.pathname === '/api/history') {
-    const to = Number(url.searchParams.get('to')) || Date.now();
-    const from = Number(url.searchParams.get('from')) || to - 7 * 86400_000;
+    const toParam = url.searchParams.get('to');
+    const to = toParam !== null && Number.isFinite(Number(toParam)) ? Number(toParam) : Date.now();
+    const fromParam = url.searchParams.get('from');
+    const from = fromParam !== null && Number.isFinite(Number(fromParam)) ? Number(fromParam) : to - 7 * 86400_000;
     if (to <= from || to - from > 400 * 86400_000) { res.writeHead(400); return res.end(); }
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
     return res.end(JSON.stringify(buildHistory(from, to)));

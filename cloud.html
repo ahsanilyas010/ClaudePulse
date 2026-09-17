@@ -380,18 +380,24 @@
   const expanded = new Set();
   const PERIOD_LABEL = { today: 'today', yesterday: 'yesterday', week: 'in the last 7 days', month: 'in the last 30 days' };
 
+  // day_stats.day is stored as THIS browser's own local calendar day, but the Edge Function
+  // runs in UTC — so we send explicit fromDay/toDay strings rather than making it re-derive
+  // calendar days from a UTC offset it doesn't know.
+  const dayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   function rangeFor(p) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
-    const shift = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.getTime(); };
-    if (p === 'today') return { from: start.getTime(), to: shift(start, 1) };
-    if (p === 'yesterday') return { from: shift(start, -1), to: start.getTime() };
-    if (p === 'week') return { from: shift(start, -6), to: shift(start, 1) };
-    return { from: shift(start, -29), to: shift(start, 1) };
+    const shift = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    let fromD, toD;
+    if (p === 'today') { fromD = start; toD = shift(start, 1); }
+    else if (p === 'yesterday') { fromD = shift(start, -1); toD = start; }
+    else if (p === 'week') { fromD = shift(start, -6); toD = shift(start, 1); }
+    else { fromD = shift(start, -29); toD = shift(start, 1); }
+    return { from: fromD.getTime(), to: toD.getTime(), fromDay: dayStr(fromD), toDay: dayStr(toD) };
   }
 
   async function loadHistory() {
-    const { from, to } = rangeFor(period);
-    try { history = await api(`history?from=${from}&to=${to}`); renderHistory(); } catch {}
+    const { from, to, fromDay, toDay } = rangeFor(period);
+    try { history = await api(`history?from=${from}&to=${to}&fromDay=${fromDay}&toDay=${toDay}`); renderHistory(); } catch {}
   }
 
   const dateFmt = (ts, opts) => new Date(ts).toLocaleString(undefined, opts);

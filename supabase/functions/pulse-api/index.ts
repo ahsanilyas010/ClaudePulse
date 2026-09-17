@@ -1,4 +1,6 @@
-// Claude Pulse cloud API — the only door into the `pulse` schema.
+// Claude Pulse cloud API — the only door into the pulse_* tables (kept in `public` since
+// PostgREST only serves that schema by default; RLS with no policies still locks them to
+// the service_role key used inside this function).
 //
 // Auth model: a single shared secret (PULSE_TOKEN, set as a function secret), checked
 // against `Authorization: Bearer <token>` on every request. There is no per-user login —
@@ -28,12 +30,22 @@ const json = (body: unknown, status = 200) =>
 
 const STATUS_RANK: Record<string, number> = { working: 0, attention: 1, error: 2, 'your-turn': 3, finished: 4, stopped: 5, idle: 6 };
 
-function dayKey(d: Date) {
+// This function always runs in UTC (Deno Deploy), but day_stats.day is stored as each
+// machine's own LOCAL calendar day. Deriving day boundaries from UTC here would drift by
+// the caller's UTC offset, so dayKeyUTC is only a fallback for a caller that didn't send
+// explicit fromDay/toDay — the real path is the client (which knows its own timezone)
+// passing those strings directly.
+function dayKeyUTC(d: Date) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+function addDaysUTC(day: string, n: number) {
+  const d = new Date(day + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 async function getState() {
-  const { data, error } = await db.schema('pulse').from('sessions').select('*').order('last_ts', { ascending: false });
+  const { data, error } = await db.from('pulse_sessions').select('*').order('last_ts', { ascending: false });
   if (error) throw error;
   const sessions = (data ?? [])
     .filter((s) => !s.archived)
@@ -53,12 +65,11 @@ function toClientSession(s: any) {
   };
 }
 
-async function getHistory(fromMs: number, toMs: number) {
-  const from = new Date(fromMs), to = new Date(toMs);
+async function getHistory(fromDay: string, toDay: string, fromMs: number, toMs: number) {
   const [{ data: days, error: e1 }, { data: sessions, error: e2 }, { data: decisions, error: e3 }] = await Promise.all([
-    db.schema('pulse').from('day_stats').select('*').gte('day', dayKey(from)).lt('day', dayKey(to)),
-    db.schema('pulse').from('sessions').select('*'),
-    db.schema('pulse').from('decisions').select('*'),
+    db.from('pulse_day_stats').select('*').gte('day', fromDay).lt('day', toDay),
+    db.from('pulse_sessions').select('*'),
+    db.from('pulse_decisions').select('*'),
   ]);
   if (e1) throw e1; if (e2) throw e2; if (e3) throw e3;
 
@@ -71,7 +82,7 @@ async function getHistory(fromMs: number, toMs: number) {
   }
 
   const perDay = new Map<string, { day: string; prompts: number; tools: number; sessions: number }>();
-  for (let t = fromMs; t < toMs; t += 86_400_000) perDay.set(dayKey(new Date(t)), { day: dayKey(new Date(t)), prompts: 0, tools: 0, sessions: 0 });
+  for (let d = fromDay; d < toDay; d = addDaysUTC(d, 1)) perDay.set(d, { day: d, prompts: 0, tools: 0, sessions: 0 });
 
   const totals = { sessions: 0, projects: 0, prompts: 0, tools: 0, files: 0, tokens: 0 };
   const allFiles = new Set<string>(); const projects = new Set<string>();
@@ -132,7 +143,7 @@ async function ingest(body: any) {
       first_ts: s.firstTs ? new Date(s.firstTs).toISOString() : null, last_ts: s.lastTs ? new Date(s.lastTs).toISOString() : null,
       starred: !!s.starred, archived: !!s.archived, timeline: s.timeline ?? [], updated_at: new Date().toISOString(),
     }));
-    const { error } = await db.schema('pulse').from('sessions').upsert(rows, { onConflict: 'id' });
+    const { error } = await db.from('pulse_sessions').upsert(rows, { onConflict: 'id' });
     if (error) throw error;
   }
   if (days.length) {
@@ -140,7 +151,7 @@ async function ingest(body: any) {
       session_id: d.sessionId, day: d.day, prompts: d.prompts, tools: d.tools, tokens: d.tokens,
       files: d.files ?? [], first_ts: new Date(d.firstTs).toISOString(), last_ts: new Date(d.lastTs).toISOString(),
     }));
-    const { error } = await db.schema('pulse').from('day_stats').upsert(rows, { onConflict: 'session_id,day' });
+    const { error } = await db.from('pulse_day_stats').upsert(rows, { onConflict: 'session_id,day' });
     if (error) throw error;
   }
   return { ok: true, sessions: sessions.length, days: days.length };
@@ -148,13 +159,13 @@ async function ingest(body: any) {
 
 async function setDecision(id: string, state: string) {
   if (state === 'clear') {
-    const { error } = await db.schema('pulse').from('decisions').delete().eq('session_id', id);
+    const { error } = await db.from('pulse_decisions').delete().eq('session_id', id);
     if (error) throw error;
     return null;
   }
   if (!['done', 'drop', 'keep'].includes(state)) throw new Error('bad state');
   const row = { session_id: id, state, at: new Date().toISOString() };
-  const { error } = await db.schema('pulse').from('decisions').upsert(row, { onConflict: 'session_id' });
+  const { error } = await db.from('pulse_decisions').upsert(row, { onConflict: 'session_id' });
   if (error) throw error;
   return row;
 }
@@ -171,9 +182,14 @@ Deno.serve(async (req) => {
   try {
     if (req.method === 'GET' && route === 'state') return json(await getState());
     if (req.method === 'GET' && route === 'history') {
-      const to = Number(url.searchParams.get('to')) || Date.now();
-      const from = Number(url.searchParams.get('from')) || to - 7 * 86_400_000;
-      return json(await getHistory(from, to));
+      const toParam = url.searchParams.get('to');
+      const to = toParam !== null && Number.isFinite(Number(toParam)) ? Number(toParam) : Date.now();
+      const fromParam = url.searchParams.get('from');
+      const from = fromParam !== null && Number.isFinite(Number(fromParam)) ? Number(fromParam) : to - 7 * 86_400_000;
+      // fromDay/toDay (local calendar-day strings) are the real query bounds — see dayKeyUTC's comment.
+      const fromDay = url.searchParams.get('fromDay') || dayKeyUTC(new Date(from));
+      const toDay = url.searchParams.get('toDay') || dayKeyUTC(new Date(to));
+      return json(await getHistory(fromDay, toDay, from, to));
     }
     if (req.method === 'POST' && route === 'ingest') return json(await ingest(await req.json()));
     if (req.method === 'POST' && route === 'decision') {

@@ -3,3 +3,4 @@ pulse-data.json
 pulse-cloud.json
 node_modules/
 *.log
+supabase/.temp/
