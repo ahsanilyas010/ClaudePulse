@@ -1,0 +1,4 @@
+# personal runtime data — not shared, will move to Supabase
+pulse-data.json
+node_modules/
+*.log

@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Pulse</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23d97757'/><path d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #ffffff; --panel-2: #f0ede6; --line: #e4dfd4;
+    --text: #1f1d1a; --muted: #6f6a60; --faint: #9a9488;
+    --accent: #c9643f; --accent-soft: #f6e3da;
+    --working: #2f6fdb; --working-soft: #e2ebfb;
+    --attention: #b7791f; --attention-soft: #f8ecd5;
+    --error: #c2412d; --error-soft: #f7dfda;
+    --done: #2f8a55; --done-soft: #dcefe3;
+    --idle: #8a8478; --idle-soft: #ebe8e1;
+    --shadow: 0 1px 2px rgba(40,30,20,.06), 0 4px 16px rgba(40,30,20,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161513; --panel: #1f1e1b; --panel-2: #282622; --line: #34312c;
+      --text: #ece9e2; --muted: #a39e93; --faint: #726d64;
+      --accent: #e08462; --accent-soft: #3a2820;
+      --working: #6d9df0; --working-soft: #1e2a40;
+      --attention: #e0a64a; --attention-soft: #3a2e1a;
+      --error: #ec7a66; --error-soft: #3d231e;
+      --done: #5cbf84; --done-soft: #1c3326;
+      --idle: #8f8a80; --idle-soft: #2a2825;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  a { color: inherit; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 40px; }
+
+  /* header */
+  header {
+    position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+  }
+  header .wrap { padding-bottom: 0; }
+  .bar { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
+  .brand svg { width: 24px; height: 24px; flex: none; }
+  .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-left: 2px; }
+  .conn.on { background: var(--done); box-shadow: 0 0 0 3px var(--done-soft); }
+  .spacer { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--panel);
+    padding: 6px 11px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 550; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--faint); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn svg { width: 15px; height: 15px; }
+  .icon-btn { padding: 6px 8px; }
+
+  .stats { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 0 12px; }
+  .stat {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px;
+    background: var(--panel-2); color: var(--muted); font-size: 12.5px; cursor: pointer; border: 1px solid transparent;
+  }
+  .stat b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat.active { border-color: var(--faint); background: var(--panel); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--idle); }
+
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    border: 0; background: none; padding: 8px 12px 10px; cursor: pointer; color: var(--muted); font-weight: 550;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab.on { color: var(--text); border-color: var(--accent); }
+
+  /* panels */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  .section-title { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 650; margin: 22px 2px 8px; display: flex; align-items: center; gap: 8px; }
+  .section-title .line { flex: 1; height: 1px; background: var(--line); }
+
+  #brief { margin-top: 16px; padding: 14px 16px; display: none; }
+  #brief.show { display: block; }
+  #brief h3 { margin: 0 0 8px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  #brief .body { font-size: 13.5px; }
+  #brief .body ul { margin: 4px 0 8px; padding-left: 18px; }
+  #brief .body p { margin: 6px 0; }
+  #brief .body strong { font-weight: 650; }
+  #brief .body h4 { margin: 12px 0 4px; font-size: 13.5px; }
+  #brief code { background: var(--panel-2); padding: 0 4px; border-radius: 4px; font-size: 12.5px; }
+  .close { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--faint); font-size: 18px; line-height: 1; }
+
+  #feed { display: flex; flex-direction: column; gap: 6px; }
+  .feed-item {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 9px 12px;
+    font-size: 13px; animation: slide .35s ease;
+  }
+  .feed-item .t { font-weight: 600; }
+  .feed-item .b { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .feed-item time { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  @keyframes slide { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+  /* projects */
+  #projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; margin-top: 4px; align-items: start; }
+  @media (max-width: 520px) { #projects { grid-template-columns: 1fr; } }
+  .project { overflow: hidden; }
+  .project-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .project-icon {
+    width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none;
+    background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; text-transform: uppercase;
+  }
+  .project-name { font-weight: 650; font-size: 14.5px; letter-spacing: -.01em; }
+  .project-path { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .project-meta { margin-left: auto; display: flex; gap: 4px; }
+
+  .session { padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .session:last-child { border-bottom: 0; }
+  .session:hover { background: color-mix(in srgb, var(--panel-2) 50%, transparent); }
+  .s-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .s-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .s-time { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px; border-radius: 999px; font-size: 11.5px;
+    font-weight: 600; white-space: nowrap; flex: none; background: var(--idle-soft); color: var(--idle);
+  }
+  .pill .dot { background: currentColor; }
+  .st-working { background: var(--working-soft); color: var(--working); }
+  .st-working .dot { animation: pulse 1.2s ease-in-out infinite; }
+  .st-attention, .st-your-turn { background: var(--attention-soft); color: var(--attention); }
+  .st-error { background: var(--error-soft); color: var(--error); }
+  .st-finished { background: var(--done-soft); color: var(--done); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; } 50% { box-shadow: 0 0 0 4px transparent; opacity: .55; } }
+
+  .s-line { margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; gap: 6px; min-width: 0; }
+  .s-line .k { color: var(--faint); flex: none; font-weight: 600; font-size: 11.5px; padding-top: 1px; width: 44px; text-transform: uppercase; letter-spacing: .03em; }
+  .s-line .v { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-width: 0; overflow-wrap: anywhere; }
+  .s-line.now .v { color: var(--working); }
+  .s-line.err .v { color: var(--error); }
+  .s-foot { margin-top: 8px; display: flex; gap: 12px; color: var(--faint); font-size: 12px; flex-wrap: wrap; align-items: center; }
+  .s-foot a { text-decoration: none; color: var(--accent); font-weight: 600; margin-left: auto; }
+  .s-foot a:hover { text-decoration: underline; }
+  .star { color: var(--attention); }
+
+  .timeline { display: none; margin-top: 10px; border-left: 2px solid var(--line); padding-left: 12px; }
+  .session.open .timeline { display: block; }
+  .session.open .s-line .v { -webkit-line-clamp: 8; }
+  .ev { font-size: 12.5px; padding: 3px 0; display: grid; grid-template-columns: 58px 1fr; gap: 8px; }
+  .ev .who { font-weight: 650; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding-top: 1px; }
+  .ev.you .who { color: var(--accent); }
+  .ev.claude .who { color: var(--done); }
+  .ev.tool .who { color: var(--working); }
+  .ev.error .who { color: var(--error); }
+  .ev .txt { color: var(--muted); overflow-wrap: anywhere; }
+  .ev .tn { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: var(--text); }
+
+  .older { margin-top: 18px; }
+  .older summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px 2px; }
+
+  .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+
+  /* chats & design tab */
+  .cloud { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+  .cloud .panel { padding: 16px; }
+  .cloud h3 { margin: 0 0 4px; font-size: 15px; }
+  .cloud p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+  .note { margin-top: 18px; padding: 14px 16px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--text); }
+
+  /* history */
+  .h-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .h-toolbar .btn { margin-left: auto; }
+  .seg { display: inline-flex; background: var(--panel-2); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+  .seg button { border: 0; background: none; padding: 5px 11px; border-radius: 7px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 550; }
+  .seg button.on { background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+  .h-range { color: var(--faint); font-size: 12.5px; margin: 8px 2px 0; }
+  #review, #brief { margin-top: 14px; padding: 14px 16px; display: none; }
+  #review.show { display: block; }
+  #review h3 { margin: 0 0 8px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  #review .body { font-size: 13.5px; }
+  #review .body ul { margin: 4px 0 8px; padding-left: 18px; }
+  #review .body p { margin: 6px 0; }
+  #review .body h4 { margin: 12px 0 4px; font-size: 13.5px; }
+  #review code { background: var(--panel-2); padding: 0 4px; border-radius: 4px; font-size: 12.5px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+  @media (max-width: 520px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile { padding: 12px 14px; }
+  .tile .n { font-size: 24px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tile .l { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+
+  .chart { margin-top: 10px; padding: 14px 14px 8px; }
+  .chart .bars { display: flex; align-items: flex-end; gap: 3px; height: 92px; }
+  .chart .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+  .chart .bar { width: 100%; max-width: 30px; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 0; opacity: .9; }
+  .chart .bar.zero { background: var(--line); height: 2px !important; }
+  .chart .labels { display: flex; gap: 3px; margin-top: 5px; }
+  .chart .labels span { flex: 1; text-align: center; font-size: 10.5px; color: var(--faint); min-width: 0; overflow: hidden; white-space: nowrap; }
+  .chart .cap { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+
+  .item { padding: 14px; margin-bottom: 10px; }
+  .item-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chip { font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+  .item-title { font-weight: 650; font-size: 14.5px; min-width: 0; }
+  .item-when { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .hint.warn { color: var(--attention); }
+  .kv { margin-top: 10px; }
+  .kv .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); font-weight: 650; margin-bottom: 3px; }
+  .asks { margin: 0; padding-left: 16px; font-size: 13px; color: var(--text); }
+  .asks li { margin: 2px 0; overflow-wrap: anywhere; }
+  .asks li time { color: var(--faint); font-size: 11.5px; margin-right: 4px; }
+  .files { display: flex; flex-wrap: wrap; gap: 4px; }
+  .file { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11.5px; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; color: var(--muted); }
+  .ended { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .actions .btn { padding: 4px 10px; font-size: 12.5px; }
+  .actions .btn.on-done { background: var(--done-soft); border-color: var(--done); color: var(--done); }
+  .actions .btn.on-keep { background: var(--attention-soft); border-color: var(--attention); color: var(--attention); }
+  .actions .btn.on-drop { background: var(--idle-soft); border-color: var(--idle); color: var(--idle); }
+  .actions a { margin-left: auto; font-size: 12.5px; color: var(--accent); font-weight: 600; text-decoration: none; }
+  .more { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 2px 0; font-weight: 600; }
+  .item.dim { opacity: .72; }
+
+  .hidden { display: none !important; }
+  .spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: rot .8s linear infinite; display: inline-block; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="bar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#d97757"/><path d="M6 17h5l3-7 4 13 3-6h5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Claude Pulse
+        <span class="conn" id="conn" title="Disconnected"></span>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn icon-btn" id="bell" title="Windows notifications">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      </button>
+      <button class="btn primary" id="briefBtn" title="Ask Claude for a status update across all projects">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/></svg>
+        Brief me
+      </button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="tabs">
+      <button class="tab on" data-tab="code">Live</button>
+      <button class="tab" data-tab="history">History</button>
+      <button class="tab" data-tab="cloud">Chats &amp; Design</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="tab-code">
+    <div class="panel" id="brief">
+      <h3><span id="briefIcon"></span> Status brief <button class="close" id="briefClose" aria-label="Close">×</button></h3>
+      <div class="body" id="briefBody"></div>
+    </div>
+
+    <div id="feedWrap" class="hidden">
+      <div class="section-title">Live updates <span class="line"></span></div>
+      <div id="feed"></div>
+    </div>
+
+    <div class="section-title">Projects <span class="line"></span></div>
+    <div id="projects"></div>
+    <details class="older" id="olderWrap">
+      <summary id="olderSummary"></summary>
+      <div id="older" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px;margin-top:10px"></div>
+    </details>
+  </section>
+
+  <section id="tab-history" class="hidden">
+    <div class="h-toolbar">
+      <div class="seg" id="periods">
+        <button data-period="today">Today</button>
+        <button data-period="yesterday" class="on">Yesterday</button>
+        <button data-period="week">Last 7 days</button>
+        <button data-period="month">Last 30 days</button>
+      </div>
+      <button class="btn primary" id="reviewBtn" title="Ask Claude what got done and what to finish or drop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>
+        Review with Claude
+      </button>
+    </div>
+    <div class="h-range" id="hRange"></div>
+
+    <div class="panel" id="review">
+      <h3><span id="reviewIcon"></span> <span id="reviewTitle">Review</span> <button class="close" id="reviewClose" aria-label="Close">×</button></h3>
+      <div class="body" id="reviewBody"></div>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+    <div class="panel chart hidden" id="chart"></div>
+    <div id="hSections"></div>
+  </section>
+
+  <section id="tab-cloud" class="hidden">
+    <div class="panel note">
+      <b>Why these aren't live.</b> Claude Code keeps its sessions on your computer, so Pulse can follow them second by second.
+      claude.ai chats and Claude Design projects are stored in your Claude account in the cloud, and there's no public API
+      that lets a local app read them. Use the shortcuts below to jump straight in. Anything you run in Claude Code
+      (desktop Code tab or the terminal) shows up on the first tab automatically.
+    </div>
+    <div class="cloud">
+      <div class="panel">
+        <h3>Recent chats</h3>
+        <p>Your latest conversations on claude.ai.</p>
+        <a class="btn" href="https://claude.ai/recents" target="_blank" rel="noopener">Open chats ↗</a>
+      </div>
+      <div class="panel">
+        <h3>Projects</h3>
+        <p>claude.ai Projects, with their knowledge and chats.</p>
+        <a class="btn" href="https://claude.ai/projects" target="_blank" rel="noopener">Open projects ↗</a>
+      </div>
+      <div class="panel">
+        <h3>Claude Design</h3>
+        <p>Your design canvases and prototypes.</p>
+        <a class="btn" href="https://claude.ai/design" target="_blank" rel="noopener">Open Claude Design ↗</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  let state = { sessions: [], toasts: true };
+  let filter = '';
+  const openIds = new Set();
+  const feed = [];
+  const OLD_MS = 7 * 86400_000;
+
+  const ago = (ts) => {
+    if (!ts) return '';
+    const s = Math.max(0, (Date.now() - ts) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    if (s < 86400 * 30) return `${Math.round(s / 86400)}d ago`;
+    return new Date(ts).toLocaleDateString();
+  };
+  const fmtTokens = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
+  const shortModel = (m) => (m || '').replace(/^claude-/, '').replace(/-\d{8}$/, '');
+
+  const STAT_DEFS = [
+    ['working', 'Working', (s) => s.status === 'working', 'var(--working)'],
+    ['needs', 'Needs you', (s) => s.status === 'attention' || s.status === 'your-turn', 'var(--attention)'],
+    ['error', 'Errors', (s) => s.status === 'error', 'var(--error)'],
+    ['today', 'Active today', (s) => Date.now() - s.lastTs < 86400_000, 'var(--done)'],
+  ];
+
+  function renderStats() {
+    const visible = state.sessions.filter((s) => !s.archived);
+    $('stats').innerHTML = STAT_DEFS.map(([key, label, fn, color]) => {
+      const n = visible.filter(fn).length;
+      return `<span class="stat ${filter === key ? 'active' : ''}" data-filter="${key}"><span class="dot" style="background:${color}"></span><b>${n}</b> ${label}</span>`;
+    }).join('');
+    const working = visible.filter((s) => s.status === 'working').length;
+    const needs = visible.filter((s) => s.status === 'attention' || s.status === 'error').length;
+    document.title = (needs ? `(${needs}!) ` : working ? `(${working}) ` : '') + 'Claude Pulse';
+  }
+
+  function sessionHtml(s) {
+    const lines = [];
+    if (s.lastPrompt) lines.push(`<div class="s-line"><span class="k">You</span><span class="v">${esc(s.lastPrompt)}</span></div>`);
+    if (s.status === 'error') lines.push(`<div class="s-line err"><span class="k">Error</span><span class="v">${esc(s.error)}</span></div>`);
+    else if (s.status === 'working' && s.lastTool) lines.push(`<div class="s-line now"><span class="k">Now</span><span class="v">${esc(s.lastTool.name)}${s.lastTool.detail ? ' · ' + esc(s.lastTool.detail) : ''}</span></div>`);
+    else if (s.notice) lines.push(`<div class="s-line err"><span class="k">Note</span><span class="v">${esc(s.notice)}</span></div>`);
+    else if (s.lastReply) lines.push(`<div class="s-line"><span class="k">Claude</span><span class="v">${esc(s.lastReply)}</span></div>`);
+
+    const tl = s.timeline.slice().reverse().map((e) => {
+      const who = { you: 'You', claude: 'Claude', tool: 'Tool', error: 'Issue' }[e.kind] || e.kind;
+      const txt = e.kind === 'tool' ? `<span class="tn">${esc(e.name)}</span> ${esc(e.text)}` : esc(e.text);
+      return `<div class="ev ${e.kind}"><span class="who">${who}</span><span class="txt">${txt}</span></div>`;
+    }).join('');
+
+    const foot = [
+      s.model && `<span>${esc(shortModel(s.model))}</span>`,
+      `<span>${s.prompts} prompt${s.prompts === 1 ? '' : 's'}</span>`,
+      `<span>${s.tools} tool calls</span>`,
+      s.outTokens ? `<span>${fmtTokens(s.outTokens)} tokens out</span>` : '',
+      s.branch && `<span>⎇ ${esc(s.branch)}</span>`,
+      s.localId ? `<a href="claude://claude.ai/epitaxy/${encodeURIComponent(s.localId)}" onclick="event.stopPropagation()">Open in Claude ↗</a>` : '',
+    ].filter(Boolean).join('');
+
+    return `<div class="session ${openIds.has(s.id) ? 'open' : ''}" data-id="${esc(s.id)}">
+      <div class="s-top">
+        <span class="pill st-${s.status}"><span class="dot"></span>${esc(s.statusLabel)}</span>
+        <span class="s-title" title="${esc(s.title)}">${s.starred ? '<span class="star">★</span> ' : ''}${esc(s.title)}</span>
+        <span class="s-time" data-ts="${s.lastTs}">${ago(s.lastTs)}</span>
+      </div>
+      ${lines.join('')}
+      <div class="s-foot">${foot}</div>
+      <div class="timeline">${tl || '<div class="ev"><span class="txt">No activity yet</span></div>'}</div>
+    </div>`;
+  }
+
+  function projectsHtml(list) {
+    const groups = new Map();
+    for (const s of list) {
+      const key = s.projectPath || s.project;
+      if (!groups.has(key)) groups.set(key, { name: s.project, path: s.projectPath, items: [] });
+      groups.get(key).items.push(s);
+    }
+    return [...groups.values()].map((g) => {
+      const counts = {};
+      for (const s of g.items) counts[s.status] = (counts[s.status] || 0) + 1;
+      const badges = ['working', 'attention', 'error', 'your-turn']
+        .filter((k) => counts[k])
+        .map((k) => `<span class="pill st-${k}"><span class="dot"></span>${counts[k]}</span>`).join('');
+      return `<div class="panel project">
+        <div class="project-head">
+          <div class="project-icon">${esc((g.name || '?').slice(0, 2))}</div>
+          <div style="min-width:0"><div class="project-name">${esc(g.name)}</div><div class="project-path">${esc(g.path)}</div></div>
+          <div class="project-meta">${badges}</div>
+        </div>
+        ${g.items.map(sessionHtml).join('')}
+      </div>`;
+    }).join('');
+  }
+
+  function render() {
+    renderStats();
+    const def = STAT_DEFS.find((d) => d[0] === filter);
+    let list = state.sessions.filter((s) => !s.archived);
+    if (def) list = list.filter(def[2]);
+    const recent = def ? list : list.filter((s) => s.status === 'working' || s.status === 'attention' || s.status === 'error' || Date.now() - s.lastTs < OLD_MS);
+    const older = def ? [] : list.filter((s) => !recent.includes(s));
+    const archived = state.sessions.filter((s) => s.archived);
+
+    $('projects').innerHTML = recent.length ? projectsHtml(recent)
+      : `<div class="panel empty"><b>${def ? 'Nothing here right now' : 'No recent Claude Code activity'}</b>${def ? 'Clear the filter to see everything.' : 'Start a session in Claude Code and it will appear here live.'}</div>`;
+    const rest = older.concat(filter ? [] : archived);
+    $('olderWrap').classList.toggle('hidden', !rest.length);
+    $('olderSummary').textContent = `Older & archived sessions (${rest.length})`;
+    $('older').innerHTML = rest.length ? projectsHtml(rest) : '';
+
+    $('bell').style.color = state.toasts ? 'var(--accent)' : 'var(--faint)';
+    $('bell').title = state.toasts ? 'Windows notifications on (click to mute)' : 'Windows notifications muted (click to enable)';
+  }
+
+  function renderFeed() {
+    $('feedWrap').classList.toggle('hidden', !feed.length);
+    const icon = { done: 'var(--done)', error: 'var(--error)', attention: 'var(--attention)', start: 'var(--working)' };
+    $('feed').innerHTML = feed.slice(0, 5).map((e) => `
+      <div class="panel feed-item">
+        <span class="dot" style="background:${icon[e.kind] || 'var(--idle)'};margin-top:6px"></span>
+        <div style="min-width:0"><div class="t">${esc(e.title)}</div>${e.body ? `<div class="b">${esc(e.body)}</div>` : ''}</div>
+        <time data-ts="${e.ts}">${ago(e.ts)}</time>
+      </div>`).join('');
+  }
+
+  // --- live connection
+  function connect() {
+    const es = new EventSource('/events');
+    es.addEventListener('open', () => { $('conn').classList.add('on'); $('conn').title = 'Live'; });
+    es.addEventListener('error', () => { $('conn').classList.remove('on'); $('conn').title = 'Reconnecting…'; });
+    es.addEventListener('state', (e) => { state = JSON.parse(e.data); render(); scheduleHistoryRefresh(); });
+    es.addEventListener('decision', () => { if (currentTab === 'history') loadHistory(); });
+    es.addEventListener('notify', (e) => {
+      const ev = JSON.parse(e.data);
+      feed.unshift(ev);
+      feed.length = Math.min(feed.length, 20);
+      renderFeed();
+    });
+  }
+
+  // --- interactions
+  document.addEventListener('click', (e) => {
+    const stat = e.target.closest('.stat');
+    if (stat) { filter = filter === stat.dataset.filter ? '' : stat.dataset.filter; render(); return; }
+    const tab = e.target.closest('.tab');
+    if (tab) {
+      currentTab = tab.dataset.tab;
+      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t === tab));
+      for (const name of ['code', 'history', 'cloud']) $('tab-' + name).classList.toggle('hidden', currentTab !== name);
+      $('stats').classList.toggle('hidden', currentTab !== 'code');
+      if (currentTab === 'history') loadHistory();
+      return;
+    }
+    const periodBtn = e.target.closest('[data-period]');
+    if (periodBtn) {
+      period = periodBtn.dataset.period;
+      document.querySelectorAll('[data-period]').forEach((b) => b.classList.toggle('on', b === periodBtn));
+      $('review').classList.remove('show');
+      loadHistory();
+      return;
+    }
+    const decide = e.target.closest('[data-decide]');
+    if (decide) {
+      const { id, decide: want, current } = decide.dataset;
+      const state = current === want ? 'clear' : want;
+      fetch(`/api/decision?id=${encodeURIComponent(id)}&state=${state}`, { method: 'POST', headers: { 'X-Pulse': '1' } }).then(loadHistory);
+      return;
+    }
+    const more = e.target.closest('[data-more]');
+    if (more) { expanded.add(more.dataset.more); renderHistory(); return; }
+    const sess = e.target.closest('.session');
+    if (sess && !window.getSelection().toString()) {
+      const id = sess.dataset.id;
+      openIds.has(id) ? openIds.delete(id) : openIds.add(id);
+      sess.classList.toggle('open');
+    }
+  });
+
+  $('bell').addEventListener('click', async () => {
+    const on = !state.toasts;
+    await fetch(`/api/toasts?on=${on ? 1 : 0}`, { method: 'POST', headers: { 'X-Pulse': '1' } });
+    if (on) fetch('/api/test-toast', { method: 'POST', headers: { 'X-Pulse': '1' } });
+  });
+
+  function md(text) {
+    const lines = esc(text).split(/\r?\n/);
+    let html = '', inList = false;
+    const inline = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    for (const raw of lines) {
+      const l = raw.trimEnd();
+      const li = l.match(/^\s*[-*•]\s+(.*)/);
+      if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+      if (inList) { html += '</ul>'; inList = false; }
+      const h = l.match(/^#{1,6}\s+(.*)/);
+      if (h) html += `<h4>${inline(h[1])}</h4>`;
+      else if (l.trim()) html += `<p>${inline(l)}</p>`;
+    }
+    return html + (inList ? '</ul>' : '');
+  }
+
+  // streams a Claude answer from the server into a panel
+  async function streamInto(url, { panel, body, icon, btn, waiting }) {
+    btn.disabled = true;
+    panel.classList.add('show');
+    icon.innerHTML = '<span class="spin"></span>';
+    body.innerHTML = `<p style="color:var(--muted)">${esc(waiting)}</p>`;
+    let text = '';
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'X-Pulse': '1' } });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        text += dec.decode(value, { stream: true });
+        body.innerHTML = md(text);
+      }
+      if (!text.trim()) body.innerHTML = '<p>No response from Claude.</p>';
+    } catch (err) {
+      body.innerHTML = `<p>Couldn't reach the Pulse server: ${esc(err.message)}</p>`;
+    } finally {
+      icon.textContent = '';
+      btn.disabled = false;
+    }
+  }
+
+  $('briefClose').addEventListener('click', () => $('brief').classList.remove('show'));
+  $('briefBtn').addEventListener('click', () => streamInto('/api/brief', {
+    panel: $('brief'), body: $('briefBody'), icon: $('briefIcon'), btn: $('briefBtn'), waiting: 'Asking Claude to review your sessions…',
+  }));
+
+  // --- history
+  let currentTab = 'code';
+  let period = 'yesterday';
+  let history = null;
+  const expanded = new Set();
+  const PERIOD_LABEL = { today: 'today', yesterday: 'yesterday', week: 'in the last 7 days', month: 'in the last 30 days' };
+
+  function rangeFor(p) {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const shift = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.getTime(); };
+    if (p === 'today') return { from: start.getTime(), to: shift(start, 1) };
+    if (p === 'yesterday') return { from: shift(start, -1), to: start.getTime() };
+    if (p === 'week') return { from: shift(start, -6), to: shift(start, 1) };
+    return { from: shift(start, -29), to: shift(start, 1) };
+  }
+
+  let historyTimer = 0;
+  async function loadHistory() {
+    const { from, to } = rangeFor(period);
+    try {
+      const res = await fetch(`/api/history?from=${from}&to=${to}`);
+      history = await res.json();
+      renderHistory();
+    } catch { /* server restarting; next state event retries */ }
+  }
+  // keep History fresh while it's on screen, without refetching on every live tick
+  function scheduleHistoryRefresh() {
+    if (currentTab !== 'history' || historyTimer) return;
+    historyTimer = setTimeout(() => { historyTimer = 0; loadHistory(); }, 10_000);
+  }
+
+  const dateFmt = (ts, opts) => new Date(ts).toLocaleString(undefined, opts);
+  const timeOnly = (ts) => dateFmt(ts, { hour: 'numeric', minute: '2-digit' });
+  const whenLabel = (ts) => period === 'today' || period === 'yesterday' ? timeOnly(ts) : dateFmt(ts, { weekday: 'short', day: 'numeric', month: 'short' });
+
+  function itemHtml(it) {
+    const open = expanded.has(it.id);
+    const asks = open ? it.asks : it.asks.slice(-3);
+    const files = open ? it.files : it.files.slice(0, 8);
+    const d = it.decision && it.decision.state;
+    const btn = (state, label) => `<button class="btn ${d === state ? 'on-' + state : ''}" data-decide="${state}" data-current="${d || ''}" data-id="${esc(it.id)}">${label}</button>`;
+    const warn = it.hint !== 'Claude finished its last reply';
+    return `<div class="panel item ${d === 'done' || d === 'drop' ? 'dim' : ''}">
+      <div class="item-top">
+        <span class="chip">${esc(it.project)}</span>
+        <span class="item-title">${esc(it.title)}</span>
+        <span class="item-when">${whenLabel(it.firstTs)}${it.lastTs - it.firstTs > 60_000 ? ' – ' + (dateFmt(it.firstTs, { dateStyle: 'short' }) === dateFmt(it.lastTs, { dateStyle: 'short' }) ? timeOnly(it.lastTs) : whenLabel(it.lastTs)) : ''}</span>
+      </div>
+      <div class="hint ${warn ? 'warn' : ''}">${esc(it.hint)}${it.changedSinceDecision ? ' · new activity since you marked it' : ''}</div>
+      ${it.askCount ? `<div class="kv"><div class="k">You asked (${it.askCount})</div><ul class="asks">
+        ${asks.map((a) => `<li><time>${whenLabel(a.ts)}</time>${esc(a.text)}</li>`).join('')}
+      </ul></div>` : ''}
+      ${it.fileCount ? `<div class="kv"><div class="k">Files changed (${it.fileCount})</div><div class="files">
+        ${files.map((f) => `<span class="file" title="${esc(f.path)}">${esc(f.name)}</span>`).join('')}
+      </div></div>` : ''}
+      ${it.lastReply ? `<div class="kv"><div class="k">Where it ended</div><div class="ended" ${open ? 'style="-webkit-line-clamp:12"' : ''}>${esc(it.lastReply)}</div></div>` : ''}
+      ${!open && (it.asks.length > 3 || it.files.length > 8 || (it.lastReply || '').length > 220) ? `<button class="more" data-more="${esc(it.id)}">Show more</button>` : ''}
+      <div class="actions">
+        ${btn('done', '✓ Done')}${btn('keep', '↺ Keep open')}${btn('drop', '✕ Drop')}
+        ${it.localId ? `<a href="claude://claude.ai/epitaxy/${encodeURIComponent(it.localId)}">Open in Claude ↗</a>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function renderHistory() {
+    if (!history) return;
+    const { totals, days, items, from, to } = history;
+    $('hRange').textContent = period === 'today' || period === 'yesterday'
+      ? dateFmt(from, { weekday: 'long', day: 'numeric', month: 'long' })
+      : `${dateFmt(from, { day: 'numeric', month: 'short' })} – ${dateFmt(to - 1, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+
+    const tile = (n, l) => `<div class="panel tile"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+    $('tiles').innerHTML = tile(totals.projects, 'Projects') + tile(totals.sessions, 'Sessions') + tile(totals.prompts, 'Requests') + tile(totals.files, 'Files changed');
+
+    const multiDay = days.length > 1;
+    $('chart').classList.toggle('hidden', !multiDay);
+    if (multiDay) {
+      const max = Math.max(1, ...days.map((d) => d.prompts));
+      const every = days.length > 14 ? 5 : 1;
+      $('chart').innerHTML = `<div class="cap">Requests per day</div>
+        <div class="bars">${days.map((d) => `<div class="col" title="${d.day}: ${d.prompts} requests, ${d.tools} tool calls"><div class="bar ${d.prompts ? '' : 'zero'}" style="height:${(d.prompts / max) * 100}%"></div></div>`).join('')}</div>
+        <div class="labels">${days.map((d, i) => {
+          const dt = new Date(d.day + 'T12:00:00');
+          const label = days.length > 14 ? dt.getDate() : dt.toLocaleDateString(undefined, { weekday: 'short' });
+          return `<span>${i % every === 0 || i === days.length - 1 ? label : ''}</span>`;
+        }).join('')}</div>`;
+    }
+
+    if (!items.length) {
+      $('hSections').innerHTML = `<div class="panel empty" style="margin-top:14px"><b>No Claude Code activity ${PERIOD_LABEL[period]}</b>Pick a longer period to see more.</div>`;
+      return;
+    }
+    const groups = [
+      ['To review', 'Decide whether to finish or leave these', items.filter((i) => !i.decision)],
+      ['Keeping open', 'Things you plan to finish', items.filter((i) => i.decision && i.decision.state === 'keep')],
+      ['Done', '', items.filter((i) => i.decision && i.decision.state === 'done')],
+      ['Dropped', '', items.filter((i) => i.decision && i.decision.state === 'drop')],
+    ];
+    $('hSections').innerHTML = groups.filter((g) => g[2].length).map(([title, sub, list]) => `
+      <div class="section-title">${title} · ${list.length}${sub ? ` <span style="text-transform:none;letter-spacing:0;font-weight:400">— ${sub}</span>` : ''}<span class="line"></span></div>
+      ${list.map(itemHtml).join('')}`).join('');
+  }
+
+  $('reviewClose').addEventListener('click', () => $('review').classList.remove('show'));
+  $('reviewBtn').addEventListener('click', () => {
+    const { from, to } = rangeFor(period);
+    $('reviewTitle').textContent = `Review of ${PERIOD_LABEL[period].replace(/^in the /, 'the ')}`;
+    streamInto(`/api/brief?from=${from}&to=${to}&label=${encodeURIComponent(PERIOD_LABEL[period])}`, {
+      panel: $('review'), body: $('reviewBody'), icon: $('reviewIcon'), btn: $('reviewBtn'), waiting: 'Asking Claude what got done and what’s left…',
+    });
+  });
+
+  setInterval(() => document.querySelectorAll('[data-ts]').forEach((el) => { el.textContent = ago(+el.dataset.ts); }), 15_000);
+
+  connect();
+})();
+</script>
+</body>
+</html>
