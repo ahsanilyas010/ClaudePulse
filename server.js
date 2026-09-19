@@ -15,6 +15,7 @@ const APPDATA = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
 const PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
 const LIVE_DIR = path.join(HOME, '.claude', 'sessions');
 const DESKTOP_DIR = path.join(APPDATA, 'Claude', 'claude-code-sessions');
+const COWORK_DIR = path.join(APPDATA, 'Claude', 'local-agent-mode-sessions');
 const CLI_DIR = path.join(APPDATA, 'Claude', 'claude-code');
 const BRIEF_CWD = path.join(os.tmpdir(), 'claude-pulse-brief');
 const DATA_FILE = path.join(__dirname, 'pulse-data.json'); // your Done / Drop / Keep decisions
@@ -235,24 +236,64 @@ function safeReaddir(dir) {
   try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
 }
 
+function scanTranscriptFile(file, source) {
+  const id = path.basename(file, '.jsonl');
+  let st;
+  try { st = fs.statSync(file); } catch { return; }
+  let s = sessions.get(id);
+  if (!s || s.file !== file || st.size < s.offset) { s = newSession(id, file); sessions.set(id, s); }
+  s.source = source;
+  s.mtime = st.mtimeMs;
+  if (st.size > s.offset) {
+    try { readNew(s, st.size); } catch (e) { /* file busy; retry next scan */ }
+  }
+}
+
+// Cowork sessions live in <COWORK_DIR>/<account>/<workspace>/local_<id>/ with the same transcript format under
+// .claude/projects/*/<cliSessionId>.jsonl. Only the top-level transcript is read: the folder also holds
+// .credentials.json and subagent transcripts, which must never be touched. Discovery walks a few dozen dirs, so it's
+// refreshed less often than the (cheap) per-file stat/tail-read.
+const COWORK_DISCOVER_MS = 15_000;
+let coworkFiles = [];
+let coworkDiscoveredAt = 0;
+function coworkSessionDirs() {
+  const dirs = [];
+  for (const acct of safeReaddir(COWORK_DIR)) {
+    if (!acct.isDirectory() || acct.name === 'skills-plugin') continue;
+    for (const ws of safeReaddir(path.join(COWORK_DIR, acct.name))) {
+      if (!ws.isDirectory()) continue;
+      const wsDir = path.join(COWORK_DIR, acct.name, ws.name);
+      for (const e of safeReaddir(wsDir)) if (e.isDirectory() && e.name.startsWith('local_')) dirs.push({ dir: path.join(wsDir, e.name), wsDir });
+    }
+  }
+  return dirs;
+}
+function discoverCowork(now) {
+  if (now - coworkDiscoveredAt < COWORK_DISCOVER_MS) return;
+  coworkDiscoveredAt = now;
+  const files = [];
+  for (const { dir } of coworkSessionDirs()) {
+    const projRoot = path.join(dir, '.claude', 'projects');
+    for (const proj of safeReaddir(projRoot)) {
+      if (!proj.isDirectory()) continue;
+      for (const f of safeReaddir(path.join(projRoot, proj.name))) {
+        if (f.isFile() && f.name.endsWith('.jsonl')) files.push(path.join(projRoot, proj.name, f.name));
+      }
+    }
+  }
+  coworkFiles = files;
+}
+
 function scanTranscripts() {
   for (const proj of safeReaddir(PROJECTS_DIR)) {
     if (!proj.isDirectory()) continue;
     const dir = path.join(PROJECTS_DIR, proj.name);
     for (const f of safeReaddir(dir)) {
-      if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
-      const id = f.name.slice(0, -6);
-      const file = path.join(dir, f.name);
-      let st;
-      try { st = fs.statSync(file); } catch { continue; }
-      let s = sessions.get(id);
-      if (!s || s.file !== file || st.size < s.offset) { s = newSession(id, file); sessions.set(id, s); }
-      s.mtime = st.mtimeMs;
-      if (st.size > s.offset) {
-        try { readNew(s, st.size); } catch (e) { /* file busy; retry next scan */ }
-      }
+      if (f.isFile() && f.name.endsWith('.jsonl')) scanTranscriptFile(path.join(dir, f.name), 'cli');
     }
   }
+  discoverCowork(Date.now());
+  for (const file of coworkFiles) scanTranscriptFile(file, 'cowork');
 }
 
 const metaCache = new Map(); // file -> { mtime, data }
@@ -285,6 +326,25 @@ function scanDesktopMeta() {
     }
   };
   walk(DESKTOP_DIR, 0);
+  // Cowork: the local_<id>.json next to each session dir. It also carries the system prompt, MCP config and account
+  // email, so only the fields below are ever kept.
+  for (const { dir, wsDir } of coworkSessionDirs()) {
+    const p = path.join(wsDir, path.basename(dir) + '.json');
+    let st;
+    try { st = fs.statSync(p); } catch { continue; }
+    let c = metaCache.get(p);
+    if (!c || c.mtime !== st.mtimeMs) {
+      try {
+        const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+        c = {
+          mtime: st.mtimeMs,
+          data: { localId: j.sessionId, cliId: j.cliSessionId, title: j.title, archived: !!j.isArchived, starred: false, error: '', errorAt: 0, model: j.model || '' },
+        };
+        metaCache.set(p, c);
+      } catch { continue; }
+    }
+    if (c.data.cliId) meta.set(c.data.cliId, c.data);
+  }
   desktopMeta = meta;
   deletedIds = deleted;
 }
@@ -343,7 +403,7 @@ function buildView(now = Date.now()) {
     const meta = desktopMeta.get(s.id);
     const live = liveProcs.get(s.id);
     const status = statusOf(s, live, meta, now);
-    const proj = projectOf(s);
+    const proj = s.source === 'cowork' ? { name: 'Cowork', path: s.cwd } : projectOf(s);
     out.push({
       id: s.id,
       localId: meta ? meta.localId : '',
@@ -351,7 +411,7 @@ function buildView(now = Date.now()) {
       project: proj.name, projectPath: proj.path, cwd: s.cwd, branch: s.branch,
       status, statusLabel: live && status === 'attention' ? `Needs you (${live.status})` : STATUS_LABEL[status],
       live: !!live,
-      source: live && live.entrypoint ? live.entrypoint : (meta ? 'claude-desktop' : 'cli'),
+      source: s.source === 'cowork' ? 'cowork' : live && live.entrypoint ? live.entrypoint : (meta ? 'claude-desktop' : 'cli'),
       model: s.model || (meta && meta.model) || '',
       firstPrompt: clip(s.firstPrompt, 240),
       lastPrompt: clip(s.lastPrompt, 320),
